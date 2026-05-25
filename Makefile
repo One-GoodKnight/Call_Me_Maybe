@@ -1,10 +1,10 @@
 SRC_DIR		:= src
-MYPY_FLAGS	:= 				\
-	--warn-return-any		\
-	--warn-unused-ignores	\
-	--ignore-missing-imports\
-	--disallow-untyped-defs	\
-	--check-untyped-defs
+MYPY_FLAGS	:= 					\
+	--warn-return-any			\
+	--warn-unused-ignores		\
+	--ignore-missing-imports	\
+	--disallow-untyped-defs		\
+	--check-untyped-defs		\
 
 install:
 	uv lock
@@ -17,9 +17,8 @@ debug:
 	uv run python -m pdb -m src
 
 clean:
-	rm -rf __pycache__ */__pycache__ */*/__pycache__
-	rm -rf .mypy_cache */.mypy_cache */*/.mypy_cache
-	rm -rf dist
+	find . -type d -name '__pycache__' -exec rm -rv {} +
+	find . -type d -name '.mypy_cache' -exec rm -rv {} +
 
 lint:
 	python3 -m flake8 .
