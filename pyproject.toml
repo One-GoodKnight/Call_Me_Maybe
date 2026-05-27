@@ -1,7 +1,17 @@
 [project]
 name = "call-me-maybe"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "add your description here"
+readme = "readme.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "huggingface-hub>=0.20.0",
+	"pydantic>=2.12.0",
+	"numpy>=2.4.6",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
