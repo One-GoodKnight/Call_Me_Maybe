@@ -1,4 +1,6 @@
-from src.input_validator import InputValidator
+from src.parsing.file_paths import FilePaths
+from src.parsing.parse_args import parse_args
+from src.parsing.parse_jsons import Jsons, parse_jsons
 from llm_sdk.llm_sdk import Small_LLM_Model
 import numpy as np
 
@@ -20,6 +22,10 @@ def generate_text():
 
 
 def main():
+    #generate_text()
+    file_paths: FilePaths = parse_args()
+    print(file_paths)
+    jsons: Jsons = parse_jsons(file_paths)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+ARGS = ""
+
 SRC_DIR		:= src
 MYPY_FLAGS	:= 					\
 	--warn-return-any			\
@@ -11,7 +13,7 @@ install:
 	uv sync
 
 run:
-	uv run python -m $(SRC_DIR)
+	uv run python -m $(SRC_DIR) $(ARGS)
 
 debug:
 	uv run python -m pdb -m src
