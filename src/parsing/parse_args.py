@@ -43,11 +43,25 @@ def parsing_error(desc: str) -> None:
     sys.exit(1)
 
 
+def build_file_paths(input_validator: InputValidator) -> FilePaths:
+    file_paths: FilePaths = FilePaths(
+        input_validator.func_def_file,
+        input_validator.input_file,
+        input_validator.output_file,
+    )
+    
+    return file_paths
+
+
 def parse_args() -> FilePaths:
     argv = sys.argv
 
     if len(argv) > 7:
         parsing_error("Too many arguments")
+
+    if len(argv) == 2 and len(argv[1]) == 0:
+        default_validator = input_validator = InputValidator()
+        return build_file_paths(default_validator)
 
     if (len(argv) - 1) % 2 == 1:
         parsing_error("Number of arguments must be even")
@@ -77,14 +91,7 @@ def parse_args() -> FilePaths:
 
     try:
         input_validator = InputValidator(**filled_paths)
-
-        file_paths: FilePaths = FilePaths(
-        input_validator.func_def_file,
-        input_validator.input_file,
-        input_validator.output_file,
-        )
-        return file_paths
-
+        return build_file_paths(input_validator)
     except ValidationError as e:
         parsing_error(e.errors()[0]["msg"])
         sys.exit(1)

@@ -22,10 +22,10 @@ def generate_text():
 
 
 def main():
-    #generate_text()
     file_paths: FilePaths = parse_args()
-    print(file_paths)
     jsons: Jsons = parse_jsons(file_paths)
+    print(jsons.func_def)
+    print(jsons.input)
 
 
 if __name__ == "__main__":

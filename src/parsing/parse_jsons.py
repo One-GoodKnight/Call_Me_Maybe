@@ -1,14 +1,14 @@
 import sys
-from pydantic import BaseModel, ConfigDict, Json, model_validator, Field, ValidationError
+from pydantic import BaseModel, model_validator, Field, ValidationError
 from src.parsing.file_paths import FilePaths
-from typing import Any, Self
+from typing import Self
 import json
 
 
 class Jsons():
     def __init__(self) -> None:
-        self.func_def: list[dict[str, str]] = []
-        self.input: list[dict[str, Any]] = []
+        self.input: list[dict[str, str]] = []
+        self.func_def: list[dict[str, str | dict[str, dict[str, str]]]] = []
 
 
 def parsing_error(desc: str) -> None:
@@ -18,14 +18,14 @@ def parsing_error(desc: str) -> None:
     sys.exit(1)
 
 
-class JsonTypeValidator(BaseModel):
+class JsonTypeValidator(BaseModel, extra='forbid'):
     type: str = Field(min_length=1)
 
 
-class JsonFuncDefValidator(BaseModel):
+class JsonFuncDefValidator(BaseModel, extra='forbid'):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    parameters: dict[str, dict[str, JsonTypeValidator]]
+    parameters: dict[str, JsonTypeValidator]
     returns: JsonTypeValidator
 
     @model_validator(mode='after')
@@ -37,7 +37,7 @@ class JsonFuncDefValidator(BaseModel):
 
     @model_validator(mode='after')
     def check_param_name_dup(self) -> Self:
-        seen = set()
+        seen: set[str] = set()
         for name in self.parameters:
             if name in seen:
                 raise ValueError(f"Duplicate param name detected "
@@ -50,13 +50,39 @@ class JsonPromptValidator(BaseModel, extra='forbid'):
     prompt: str = Field(min_length=1)
 
 
-def avoid_dups(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    seen = {}
+def avoid_dups(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    seen: dict[str, object] = {}
     for k, v in pairs:
         if k in seen:
             raise ValueError("Duplicate key detected in json file")
         seen[k] = v
     return seen
+
+
+def parse_func_def(
+        file_path: str
+    ) -> list[dict[str, str | dict[str, dict[str, str]]]]:
+    raw_func_defs = []
+
+    try:
+        with open(file_path) as f:
+            raw_func_defs = json.load(f, object_pairs_hook=avoid_dups)
+    except Exception as e:
+        parsing_error(f"{e}")
+
+    if not isinstance(raw_func_defs, list):
+        parsing_error("Function definitions must be inside an array")
+
+    for func_def in raw_func_defs:
+        if not isinstance(func_def, dict):
+            parsing_error("Every function definition must be a dictionary")
+
+        try:
+            _ = JsonFuncDefValidator(**func_def)
+        except ValidationError as e:
+            parsing_error(f"{e.errors()}")
+
+    return raw_func_defs
 
 
 def parse_prompts(file_path: str) -> list[dict[str, str]]:
@@ -77,34 +103,10 @@ def parse_prompts(file_path: str) -> list[dict[str, str]]:
 
         try:
             _ = JsonPromptValidator(**prompt)
-        except Exception as e:
-            parsing_error(str(e))
+        except ValidationError as e:
+            parsing_error(f"{e.errors()}")
 
     return raw_prompts
-
-
-def parse_func_def(file_path: str) -> list[dict[str, Any]]:
-    raw_func_defs = []
-
-    try:
-        with open(file_path) as f:
-            raw_func_defs = json.load(f, object_pairs_hook=avoid_dups)
-    except Exception as e:
-        parsing_error(f"{e}")
-
-    if not isinstance(raw_func_defs, list):
-        parsing_error("Function definitions must be inside an array")
-
-    for func_def in raw_func_defs:
-        if not isinstance(func_def, dict):
-            parsing_error("Every function definition must be a dictionary")
-
-        try:
-            _ = JsonFuncDefValidator(**func_def)
-        except Exception as e:
-            parsing_error(str(e))
-
-    return raw_func_defs
 
 
 def parse_jsons(file_paths: FilePaths) -> Jsons:
@@ -112,4 +114,4 @@ def parse_jsons(file_paths: FilePaths) -> Jsons:
     jsons.func_def = parse_func_def(file_paths.func_def)
     jsons.input = parse_prompts(file_paths.input)
     
-    return Jsons()
+    return jsons
