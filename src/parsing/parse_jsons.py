@@ -8,7 +8,7 @@ import json
 class Jsons():
     def __init__(self) -> None:
         self.input: list[dict[str, str]] = []
-        self.func_def: list[dict[str, str | dict[str, dict[str, str]]]] = []
+        self.func_def: list[dict[str, object]] = []
 
 
 def parsing_error(desc: str) -> None:
