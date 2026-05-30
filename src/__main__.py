@@ -1,6 +1,6 @@
 from src.parsing.file_paths import FilePaths
 from src.parsing.parse_args import parse_args
-from src.parsing.parse_jsons import Jsons, parse_jsons
+from src.parsing.parse_jsons import Jsons, parse_jsons_user, parse_jsons_model
 from llm_sdk.llm_sdk import Small_LLM_Model
 import numpy as np
 import json
@@ -46,7 +46,7 @@ class LLM():
     def get_prompt_solution(self, prompt: str) -> str:
         template = self.get_chat_template(prompt)
 
-        tokens = [int(token) for token in self.model.encode(text)[0]]
+        tokens = [int(token) for token in self.model.encode(template)[0]]
         
         solution: str = ""
         for _ in range(500):
@@ -69,12 +69,14 @@ class LLM():
 
 def main():
     file_paths: FilePaths = parse_args()
-    jsons: Jsons = parse_jsons(file_paths)
-    #print(jsons.func_def)
-    #print(jsons.input)
+    jsons: Jsons = parse_jsons_user(file_paths)
 
     llm: LLM = LLM()
+    parse_jsons_model(llm.model, jsons)
+
     llm.give_context_functions_definitions(jsons.func_def)
+
+    print(jsons.vocab)
     _ = llm.get_prompt_solution(jsons.input[0]["prompt"])
 
 

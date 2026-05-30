@@ -1,14 +1,17 @@
 import sys
-from pydantic import BaseModel, model_validator, Field, ValidationError
-from src.parsing.file_paths import FilePaths
-from typing import Self
 import json
+from pydantic import BaseModel, model_validator, Field, ValidationError
+from typing import Self
+from llm_sdk.llm_sdk import Small_LLM_Model
+from src.parsing.file_paths import FilePaths
 
 
 class Jsons():
     def __init__(self) -> None:
         self.input: list[dict[str, str]] = []
         self.func_def: list[dict[str, object]] = []
+        self.vocab: dict[str, int] = {}
+        self.tokenizer: dict[str, object] = {}
 
 
 def parsing_error(desc: str) -> None:
@@ -61,7 +64,7 @@ def avoid_dups(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def parse_func_def(
         file_path: str
-    ) -> list[dict[str, str | dict[str, dict[str, str]]]]:
+    ) -> list[dict[str, object]]:
     raw_func_defs = []
 
     try:
@@ -109,9 +112,26 @@ def parse_prompts(file_path: str) -> list[dict[str, str]]:
     return raw_prompts
 
 
-def parse_jsons(file_paths: FilePaths) -> Jsons:
+def parse_jsons_user(file_paths: FilePaths) -> Jsons:
     jsons = Jsons()
     jsons.func_def = parse_func_def(file_paths.func_def)
     jsons.input = parse_prompts(file_paths.input)
     
     return jsons
+
+
+def parse_jsons_model(model: Small_LLM_Model, jsons: Jsons):
+    vocab_path = model.get_path_to_vocab_file()
+    tokenizer_path = model.get_path_to_tokenizer_file()
+    
+    try:
+        with open(vocab_path) as f:
+            jsons.vocab = json.load(f)
+    except Exception as e:
+        parsing_error(f"{e}")
+
+    try:
+        with open(tokenizer_path) as f:
+            jsons.tokenizer = json.load(f)
+    except Exception as e:
+        parsing_error(f"{e}")
