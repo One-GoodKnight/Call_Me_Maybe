@@ -2,3 +2,4 @@ __pycache__
 .build
 .venv
 .python-version
+.mypy_cache

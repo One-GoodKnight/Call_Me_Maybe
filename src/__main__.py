@@ -9,13 +9,10 @@ def main():
     file_paths: FilePaths = parse_args()
     jsons: Jsons = parse_jsons_user(file_paths)
 
-    llm: LLM = LLM()
-    parse_jsons_model(llm.model, jsons)
-    parse_special_tokens(llm, jsons.tokenizer)
-    print(llm.special_tokens)
+    llm: LLM = LLM(jsons)
 
-    llm.give_context_functions_definitions(jsons.func_def)
-
+    #llm.give_context_functions_definitions(jsons.func_def)
+    
     # print(llm.model.get_path_to_vocab_file())
 
     _ = llm.get_prompt_solution(jsons.input[0]["prompt"])

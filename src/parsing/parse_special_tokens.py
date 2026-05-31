@@ -1,5 +1,4 @@
 import sys
-from src.llm import LLM
 from typing import cast
 
 
@@ -29,7 +28,7 @@ def find_content(
     return id
 
 
-def parse_special_tokens(llm: LLM, tokenizer: dict[str, object]):
+def parse_special_tokens(tokenizer: dict[str, object]) -> dict[str, int]:
     tokens_to_get: list[str] = [
         "<|endoftext|>",
         "<|im_start|>", "<|im_end|>",
@@ -43,8 +42,11 @@ def parse_special_tokens(llm: LLM, tokenizer: dict[str, object]):
     except Exception as e:
         parsing_error(f"{e}")
 
+    special_tokens: dict[str, int] = {}
     for token_to_get in tokens_to_get:
-        llm.special_tokens[token_to_get] = find_content(
+        special_tokens[token_to_get] = find_content(
             added_tokens,
             token_to_get
         )
+
+    return special_tokens
