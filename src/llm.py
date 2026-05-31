@@ -6,6 +6,16 @@ from typing import cast
 from src.parsing.parse_jsons import Jsons, parse_jsons_model
 from src.parsing.parse_special_tokens import parse_special_tokens
 import math
+import re
+from enum import Enum
+
+
+class NumberStage(Enum):
+    MINUS = 0,
+    LEFT_VALUE_DOT = 1,
+    DOT = 2,
+    RIGHT_VALUE_DOT = 3,
+    END = 4,
 
 
 class LLM():
@@ -21,6 +31,11 @@ class LLM():
         parse_jsons_model(self.model, jsons)
 
         self.func_defs: list[dict[str, object]] = jsons.func_def
+        self.vocab: dict[str, int] = jsons.vocab
+        self.reverse_vocab: dict[int, str] = {
+            v: k for k, v in self.vocab.items()
+        }
+
         self.special_tokens: dict[str, int] = parse_special_tokens(
             jsons.tokenizer
         )
@@ -38,6 +53,9 @@ class LLM():
         self.pre_enc_prompt |= {'}}\n</tool_call>': []}
         self.pre_enc_prompt |= {'"': []}
         self.pre_enc_prompt |= {'</tool_call>\n': []}
+        self.pre_enc_prompt |= {',': []}
+        self.pre_enc_prompt |= {' ': []}
+        self.pre_enc_prompt |= {'}': []}
         for token_text in self.pre_enc_prompt:
             self.pre_enc_prompt[token_text] = (
                 [int(token) for token in self.model.encode(token_text)[0]]
@@ -86,26 +104,43 @@ class LLM():
         print("Incomplete solution to prompt\n", file=sys.stderr)
         sys.exit(1)
 
-    def __apply_mask(self, logits: list[float], mask: set[int]):
-        extended_mask = mask.copy()
-        extended_mask.add(self.special_tokens["<|endoftext|>"])
-
+    def __apply_mask_token_ids(self, logits: list[float], mask: set[int]):
         for i in range(len(logits)):
-            if i not in extended_mask:
+            if i == self.special_tokens["<|endoftext|>"]:
+                continue
+            if i not in mask:
                 logits[i] = -math.inf
+
+    def __apply_mask_regex(self, logits: list[float], mask: str):
+        for i in range(len(logits)):
+            if i == self.special_tokens["<|endoftext|>"]:
+                continue
+            if i not in self.reverse_vocab:
+                logits[i] = -math.inf
+                continue
+            if not re.match(mask, self.reverse_vocab[i]):
+                logits[i] = -math.inf
+            # else:
+                # print("logit not -inf")
 
     def __get_next_token(
             self,
             tokens: list[int],
-            mask: set[int] | None = None) -> int:
+            mask: set[int] | str | None = None) -> int:
+        if isinstance(mask, str):
+            text = self.model.decode(tokens)
+            print(text)
         new_token_id = 0
 
         logits = self.model.get_logits_from_input_ids(tokens)
         if len(logits) == 0:
             self.__no_logits_found()
 
-        if mask:
-            self.__apply_mask(logits, mask)
+        if isinstance(mask, set):
+            self.__apply_mask_token_ids(logits, mask)
+        if isinstance(mask, str):
+            pass
+            self.__apply_mask_regex(logits, mask)
 
         i_max_prob_token = np.argmax(logits)
         new_token_id = int(i_max_prob_token)
@@ -135,16 +170,129 @@ class LLM():
 
         self.__incomplete_prompt_solution()
 
-    def __get_argument_template(self, func_name: str, index: int) -> str:
+    def __get_argument_template(
+            self,
+            name: str,
+            type: str,
+            index: int) -> str:
         template = ""
         if index != 0:
             template += ","
-        template += ' "'
-        template += self.func_defs
+        template += f' "{name}":'
+        if type == "string":
+            template += '"'
+        return template
 
+    def __get_arguments_name_type(self, func_name: str) -> list[dict[str, str]]:
+        arg_names: list[dict[str, str]] = []
+        for func in self.func_defs:
+            if func["name"] == func_name:
+                for name, type_dict in cast(dict[str, object], func["parameters"]).items():
+                    arg_names.append({name: cast(dict[str, str], type_dict)["type"]})
+        return arg_names
+    
+    def __get_regex_mask(
+            self,
+            type: str,
+            stage: NumberStage = NumberStage.MINUS) -> str:
+        mask = r""
+        if type == "string":
+            mask = r'^(?=.)[^"]*"?$'
+        elif type == "number":
+            if stage == NumberStage.MINUS:
+                mask = r"^(?=.) {1}-?[0-9]*$"
+            if stage == NumberStage.LEFT_VALUE_DOT:
+                mask = r"^(?=.)[0-9]+$"
+            if stage == NumberStage.DOT:
+                mask = r"^(?=.)[0-9]*(\.?[0-9]+)?(,| |})?$"
+            if stage == NumberStage.RIGHT_VALUE_DOT:
+                mask = r"^(?=.)[0-9]+(,| |})?$"
+            if stage == NumberStage.END:
+                mask = r"^(?=.)[0-9]*(,| |})?$"
 
-    def __get_arguments(self, tokens: list[int], string):
-        pass
+        return mask
+
+    def __get_number_value_stage(self, value: str) -> NumberStage:
+        if "." in value and value.index(".") + 1 != len(value):
+            return NumberStage.END
+        if "." in value and value.index(".") + 1 == len(value):
+            return NumberStage.RIGHT_VALUE_DOT
+        if (len(value) > 2 or (len(value) == 2 and value[0] == "-")
+            or (len(value) == 1 and value[0] != "-")):
+            return NumberStage.DOT
+        if len(value) > 1 or (len(value) == 1 and value[0] == "-"):
+            return NumberStage.LEFT_VALUE_DOT
+        return NumberStage.MINUS
+
+    def __get_arg_value(self, tokens: list[int], type: str) -> str:
+        max_tokens = 100
+        value = ""
+        stage: NumberStage | None = None
+        mask: str | None = None
+        if type == "string":
+            mask = self.__get_regex_mask(type)
+        
+        for _ in range(max_tokens):
+            if type == "number":
+                stage = self.__get_number_value_stage(value)
+                mask = self.__get_regex_mask(type, stage)
+
+            new_token_id = self.__get_next_token(tokens, mask)
+
+            if new_token_id == self.special_tokens['<|endoftext|>']:
+                print("End of text generated")
+                self.__incomplete_prompt_solution()
+
+            if (new_token_id == self.pre_enc_prompt[','][0]
+                or new_token_id == self.pre_enc_prompt[' '][0]
+                or new_token_id == self.pre_enc_prompt['}'][0]):
+                return value
+
+            new_token = self.model.decode([new_token_id])
+
+            end = False
+            if "," in new_token:
+                end = True
+                new_token = new_token[:value.index(",")]
+            if " " in new_token:
+                end = True
+                new_token = new_token[:value.index(" ")]
+            if "}" in new_token:
+                end = True
+                new_token = new_token[:value.index("}")]
+            
+            if end:
+                new_token_truncated_id = self.model.encode(new_token)[0]
+                tokens += [int(token) for token in new_token_truncated_id]
+            else:
+                tokens += [new_token_id]
+            
+            value += new_token
+
+            print(stage)
+            print(f"{new_token}\n", end="", flush=True)
+            
+            if end:
+                return value
+
+        self.__incomplete_prompt_solution()
+
+    def __get_arguments(
+            self,
+            tokens: list[int],
+            func_name: str) -> list[dict[str, str]]:
+        arg_values: list[dict[str, str]] = []
+        args = self.__get_arguments_name_type(func_name)
+
+        for i in range(len(args)):
+            name: str = list(args[i].keys())[0]
+            type: str = list(args[i].values())[0]
+            template = self.__get_argument_template(name, type, i)
+            tokens += [int(token) for token in self.model.encode(template)[0]]
+            value = self.__get_arg_value(tokens, type)
+            arg_values.append({name: value})
+
+        return arg_values
 
     def __assert_function_name(self, name: str):
         found = False
@@ -172,19 +320,9 @@ class LLM():
 
         tokens += self.pre_enc_prompt['", "arguments": {']
         solution += '", "arguments": {'
-
-        for _ in range(500):
-            new_token_id = self.__get_next_token(tokens)
-
-            if (new_token_id == self.special_tokens["<|endoftext|>"] or
-                new_token_id == self.special_tokens["</tool_call>"]):
-                break
-
-            tokens += [new_token_id]
-
-            new_token = self.model.decode([new_token_id])
-            print(f"{new_token}", end="", flush=True)
-            solution += new_token
+        
+        args = self.__get_arguments(tokens, name)
+        print(args)
 
         print(solution)
         return solution

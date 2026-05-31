@@ -3,6 +3,7 @@ from src.parsing.parse_args import parse_args
 from src.parsing.parse_jsons import Jsons, parse_jsons_user, parse_jsons_model
 from src.parsing.parse_special_tokens import parse_special_tokens
 from src.llm import LLM
+import re
 
 
 def main():
