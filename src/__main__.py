@@ -7,6 +7,8 @@ import re
 
 
 def main():
+    # print(re.match(r'^(?=.)"{1}:{1} {1}-?[0-9]*$', '": -'))
+    # return (0)
     file_paths: FilePaths = parse_args()
     jsons: Jsons = parse_jsons_user(file_paths)
 

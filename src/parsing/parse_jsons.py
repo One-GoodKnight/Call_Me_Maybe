@@ -140,12 +140,19 @@ def parse_jsons_model(model: Small_LLM_Model, jsons: Jsons):
     
     try:
         with open(vocab_path) as f:
-            jsons.vocab = json.load(f)
+            vocab = json.load(f)
+            if not isinstance(vocab, dict):
+                parsing_error("Vocab json must contain a dict")
+            jsons.vocab = vocab
     except Exception as e:
         parsing_error(f"{e}")
 
     try:
         with open(tokenizer_path) as f:
-            jsons.tokenizer = json.load(f)
+            tokenizer = json.load(f)
+            if not isinstance(tokenizer, dict):
+                parsing_error("Tokenizer json must contain a dict")
+            jsons.tokenizer = tokenizer
     except Exception as e:
         parsing_error(f"{e}")
+

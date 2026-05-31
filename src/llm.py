@@ -11,11 +11,14 @@ from enum import Enum
 
 
 class NumberStage(Enum):
-    MINUS = 0,
-    LEFT_VALUE_DOT = 1,
-    DOT = 2,
-    RIGHT_VALUE_DOT = 3,
-    END = 4,
+    DOUBLE_QUOTE = 0,
+    DOUBLE_POINT = 1,
+    SPACE = 2,
+    MINUS = 3,
+    LEFT_VALUE_DOT = 4,
+    DOT = 5,
+    RIGHT_VALUE_DOT = 6,
+    END = 7,
 
 
 class LLM():
@@ -32,8 +35,8 @@ class LLM():
 
         self.func_defs: list[dict[str, object]] = jsons.func_def
         self.vocab: dict[str, int] = jsons.vocab
-        self.reverse_vocab: dict[int, str] = {
-            v: k for k, v in self.vocab.items()
+        self.decoded_vocab: dict[int, str] = {
+            v: self.model.decode([v]) for v in self.vocab.values()
         }
 
         self.special_tokens: dict[str, int] = parse_special_tokens(
@@ -115,21 +118,29 @@ class LLM():
         for i in range(len(logits)):
             if i == self.special_tokens["<|endoftext|>"]:
                 continue
-            if i not in self.reverse_vocab:
+            if i not in self.decoded_vocab:
                 logits[i] = -math.inf
                 continue
-            if not re.match(mask, self.reverse_vocab[i]):
-                logits[i] = -math.inf
+            try:
+                if not re.match(mask, self.decoded_vocab[i]):
+                    logits[i] = -math.inf
+            except Exception as e:
+                print(f"Error trying to access decoded_vocab {e}")
             # else:
                 # print("logit not -inf")
+        print(mask)
+        # for i in range(len(logits)):
+        #     if logits[i] > -100000:
+        #         if i in self.decoded_vocab:
+        #             print(self.decoded_vocab[i])
 
     def __get_next_token(
             self,
             tokens: list[int],
             mask: set[int] | str | None = None) -> int:
-        if isinstance(mask, str):
-            text = self.model.decode(tokens)
-            print(text)
+        # if isinstance(mask, str):
+        #     text = self.model.decode(tokens)
+        #     print(text)
         new_token_id = 0
 
         logits = self.model.get_logits_from_input_ids(tokens)
@@ -139,7 +150,6 @@ class LLM():
         if isinstance(mask, set):
             self.__apply_mask_token_ids(logits, mask)
         if isinstance(mask, str):
-            pass
             self.__apply_mask_regex(logits, mask)
 
         i_max_prob_token = np.argmax(logits)
@@ -178,9 +188,9 @@ class LLM():
         template = ""
         if index != 0:
             template += ","
-        template += f' "{name}":'
+        template += f' "{name}'
         if type == "string":
-            template += '"'
+            template += '": "'
         return template
 
     def __get_arguments_name_type(self, func_name: str) -> list[dict[str, str]]:
@@ -194,13 +204,19 @@ class LLM():
     def __get_regex_mask(
             self,
             type: str,
-            stage: NumberStage = NumberStage.MINUS) -> str:
+            stage: NumberStage = NumberStage.DOUBLE_QUOTE) -> str:
         mask = r""
         if type == "string":
             mask = r'^(?=.)[^"]*"?$'
         elif type == "number":
+            if stage == NumberStage.DOUBLE_QUOTE:
+                mask = r'^(?=.)"?:? ?-?[0-9]*$'
+            if stage == NumberStage.DOUBLE_POINT:
+                mask = r'^(?=.):? ?-?[0-9]*$'
+            if stage == NumberStage.SPACE:
+                mask = r'^(?=.) ?-?[0-9]*$'
             if stage == NumberStage.MINUS:
-                mask = r"^(?=.) {1}-?[0-9]*$"
+                mask = r'^(?=.)-?[0-9]*$'
             if stage == NumberStage.LEFT_VALUE_DOT:
                 mask = r"^(?=.)[0-9]+$"
             if stage == NumberStage.DOT:
@@ -222,19 +238,22 @@ class LLM():
             return NumberStage.DOT
         if len(value) > 1 or (len(value) == 1 and value[0] == "-"):
             return NumberStage.LEFT_VALUE_DOT
-        return NumberStage.MINUS
+
+        return NumberStage.DOUBLE_QUOTE
 
     def __get_arg_value(self, tokens: list[int], type: str) -> str:
         max_tokens = 100
         value = ""
-        stage: NumberStage | None = None
+        stage: NumberStage = NumberStage.DOUBLE_QUOTE
         mask: str | None = None
         if type == "string":
             mask = self.__get_regex_mask(type)
+        generated_space = False
         
         for _ in range(max_tokens):
             if type == "number":
-                stage = self.__get_number_value_stage(value)
+                if generated_space:
+                    stage = self.__get_number_value_stage(value)
                 mask = self.__get_regex_mask(type, stage)
 
             new_token_id = self.__get_next_token(tokens, mask)
@@ -251,15 +270,15 @@ class LLM():
             new_token = self.model.decode([new_token_id])
 
             end = False
-            if "," in new_token:
+            if any(char.isdigit() for char in value) and "," in new_token:
                 end = True
-                new_token = new_token[:value.index(",")]
-            if " " in new_token:
+                new_token = new_token[:new_token.index(",")]
+            if any(char.isdigit() for char in value) and " " in new_token:
                 end = True
-                new_token = new_token[:value.index(" ")]
-            if "}" in new_token:
+                new_token = new_token[:new_token.index(" ")]
+            if any(char.isdigit() for char in value) and "}" in new_token:
                 end = True
-                new_token = new_token[:value.index("}")]
+                new_token = new_token[:new_token.index("}")]
             
             if end:
                 new_token_truncated_id = self.model.encode(new_token)[0]
@@ -267,11 +286,20 @@ class LLM():
             else:
                 tokens += [new_token_id]
             
+            if new_token.startswith('"'):
+                new_token = new_token[1:]
+                stage = NumberStage.DOUBLE_POINT
+            if new_token.startswith(':'):
+                new_token = new_token[1:]
+                stage = NumberStage.SPACE
+            if new_token.startswith(' '):
+                new_token = new_token[1:]
+                stage = NumberStage.MINUS
+                generated_space = True
             value += new_token
 
-            print(stage)
-            print(f"{new_token}\n", end="", flush=True)
-            
+            print(value)
+
             if end:
                 return value
 
