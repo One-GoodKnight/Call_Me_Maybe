@@ -248,11 +248,11 @@ class LLM():
         mask: str | None = None
         if type == "string":
             mask = self.__get_regex_mask(type)
-        generated_space = False
+        generated_first_space = False
         
         for _ in range(max_tokens):
             if type == "number":
-                if generated_space:
+                if generated_first_space:
                     stage = self.__get_number_value_stage(value)
                 mask = self.__get_regex_mask(type, stage)
 
@@ -262,9 +262,10 @@ class LLM():
                 print("End of text generated")
                 self.__incomplete_prompt_solution()
 
-            if (new_token_id == self.pre_enc_prompt[','][0]
+            if (generated_first_space and
+                (new_token_id == self.pre_enc_prompt[','][0]
                 or new_token_id == self.pre_enc_prompt[' '][0]
-                or new_token_id == self.pre_enc_prompt['}'][0]):
+                or new_token_id == self.pre_enc_prompt['}'][0])):
                 return value
 
             new_token = self.model.decode([new_token_id])
@@ -295,7 +296,7 @@ class LLM():
             if new_token.startswith(' '):
                 new_token = new_token[1:]
                 stage = NumberStage.MINUS
-                generated_space = True
+                generated_first_space = True
             value += new_token
 
             print(value)
