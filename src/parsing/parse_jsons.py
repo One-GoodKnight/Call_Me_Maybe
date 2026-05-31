@@ -4,6 +4,7 @@ from pydantic import BaseModel, model_validator, Field, ValidationError
 from typing import Self
 from llm_sdk.llm_sdk import Small_LLM_Model
 from src.parsing.file_paths import FilePaths
+from typing import cast
 
 
 class Jsons():
@@ -23,6 +24,12 @@ def parsing_error(desc: str) -> None:
 
 class JsonTypeValidator(BaseModel, extra='forbid'):
     type: str = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def check_type(self) -> Self:
+        if self.type != "number" and self.type != "string":
+            parsing_error(f"'{self.type}' is not a supported argument type")
+        return self
 
 
 class JsonFuncDefValidator(BaseModel, extra='forbid'):
@@ -84,6 +91,13 @@ def parse_func_def(
             _ = JsonFuncDefValidator(**func_def)
         except ValidationError as e:
             parsing_error(f"{e.errors()}")
+
+    check_dups: set[str] = set()
+    for func in raw_func_defs:
+        check_dups.add(cast(str, func["name"]))
+
+    if len(check_dups) != len(raw_func_defs):
+        parsing_error("Function overloading is not supported")
 
     return raw_func_defs
 

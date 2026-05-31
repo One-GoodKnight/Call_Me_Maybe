@@ -135,6 +135,14 @@ class LLM():
 
         self.__incomplete_prompt_solution()
 
+    def __get_argument_template(self, func_name: str, index: int) -> str:
+        template = ""
+        if index != 0:
+            template += ","
+        template += ' "'
+        template += self.func_defs
+
+
     def __get_arguments(self, tokens: list[int], string):
         pass
 
