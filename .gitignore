@@ -3,3 +3,5 @@ __pycache__
 .venv
 .python-version
 .mypy_cache
+output/
+backup

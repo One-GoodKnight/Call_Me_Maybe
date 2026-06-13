@@ -126,6 +126,7 @@ class LLM():
                     logits[i] = -math.inf
             except Exception as e:
                 print(f"Error trying to access decoded_vocab {e}")
+                sys.exit(1)
 
     def __get_next_token(
             self,
