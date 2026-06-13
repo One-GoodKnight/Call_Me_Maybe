@@ -93,7 +93,7 @@ class LLM():
         + '{"name": <function-name>, "arguments": <args-json-object>}\n'
         + "</tool_call><|im_end|>\n"
         + "<|im_start|>user\n"
-        + f"{prompt}<|im_end|>\n"
+        + f"{prompt.replace('"', "'")}<|im_end|>\n"
         + "<|im_start|>assistant\n"
         + "<think>\n\n</think>\n\n"
         )
@@ -126,21 +126,11 @@ class LLM():
                     logits[i] = -math.inf
             except Exception as e:
                 print(f"Error trying to access decoded_vocab {e}")
-            # else:
-                # print("logit not -inf")
-        print(mask)
-        # for i in range(len(logits)):
-        #     if logits[i] > -100000:
-        #         if i in self.decoded_vocab:
-        #             print(self.decoded_vocab[i])
 
     def __get_next_token(
             self,
             tokens: list[int],
             mask: set[int] | str | None = None) -> int:
-        # if isinstance(mask, str):
-        #     text = self.model.decode(tokens)
-        #     print(text)
         new_token_id = 0
 
         logits = self.model.get_logits_from_input_ids(tokens)
@@ -207,20 +197,20 @@ class LLM():
             stage: NumberStage = NumberStage.DOUBLE_QUOTE) -> str:
         mask = r""
         if type == "string":
-            mask = r'^(?=.)[^"]*"?$'
+            mask = r'^(?=.).*$'
         elif type == "number":
             if stage == NumberStage.DOUBLE_QUOTE:
-                mask = r'^(?=.)"?:? ?-?[0-9]*$'
+                mask = r'^(?=.)"(:|: |: -)?$'
             if stage == NumberStage.DOUBLE_POINT:
-                mask = r'^(?=.):? ?-?[0-9]*$'
+                mask = r'^(?=.):( | -)?$'
             if stage == NumberStage.SPACE:
-                mask = r'^(?=.) ?-?[0-9]*$'
+                mask = r'^(?=.) (-)?$'
             if stage == NumberStage.MINUS:
                 mask = r'^(?=.)-?[0-9]*$'
             if stage == NumberStage.LEFT_VALUE_DOT:
-                mask = r"^(?=.)[0-9]+$"
+                mask = r"^(?=.)[0-9]*$"
             if stage == NumberStage.DOT:
-                mask = r"^(?=.)[0-9]*(\.?[0-9]+)?(,| |})?$"
+                mask = r"^(?=.)[0-9]*(\.|(,|}))?$"
             if stage == NumberStage.RIGHT_VALUE_DOT:
                 mask = r"^(?=.)[0-9]+(,| |})?$"
             if stage == NumberStage.END:
@@ -229,16 +219,19 @@ class LLM():
         return mask
 
     def __get_number_value_stage(self, value: str) -> NumberStage:
+        if len(value) == 0:
+            return NumberStage.LEFT_VALUE_DOT
+
         if "." in value and value.index(".") + 1 != len(value):
             return NumberStage.END
         if "." in value and value.index(".") + 1 == len(value):
             return NumberStage.RIGHT_VALUE_DOT
-        if (len(value) > 2 or (len(value) == 2 and value[0] == "-")
-            or (len(value) == 1 and value[0] != "-")):
+        if (len(value) >= 2 or (len(value) == 1 and value[0] != "-")):
             return NumberStage.DOT
-        if len(value) > 1 or (len(value) == 1 and value[0] == "-"):
+        if len(value) == 1 and value[0] == "-":
             return NumberStage.LEFT_VALUE_DOT
 
+        print("Could not determine current number stage")
         return NumberStage.DOUBLE_QUOTE
 
     def __get_arg_value(self, tokens: list[int], type: str) -> str:
@@ -246,9 +239,10 @@ class LLM():
         value = ""
         stage: NumberStage = NumberStage.DOUBLE_QUOTE
         mask: str | None = None
+        generated_first_space = False
         if type == "string":
             mask = self.__get_regex_mask(type)
-        generated_first_space = False
+            generated_first_space = True
         
         for _ in range(max_tokens):
             if type == "number":
@@ -259,10 +253,9 @@ class LLM():
             new_token_id = self.__get_next_token(tokens, mask)
 
             if new_token_id == self.special_tokens['<|endoftext|>']:
-                print("End of text generated")
                 self.__incomplete_prompt_solution()
 
-            if (generated_first_space and
+            if (generated_first_space and type == "number" and
                 (new_token_id == self.pre_enc_prompt[','][0]
                 or new_token_id == self.pre_enc_prompt[' '][0]
                 or new_token_id == self.pre_enc_prompt['}'][0])):
@@ -271,35 +264,41 @@ class LLM():
             new_token = self.model.decode([new_token_id])
 
             end = False
-            if any(char.isdigit() for char in value) and "," in new_token:
-                end = True
-                new_token = new_token[:new_token.index(",")]
-            if any(char.isdigit() for char in value) and " " in new_token:
-                end = True
-                new_token = new_token[:new_token.index(" ")]
-            if any(char.isdigit() for char in value) and "}" in new_token:
-                end = True
-                new_token = new_token[:new_token.index("}")]
+            if type == "number" and generated_first_space:
+                if "," in new_token:
+                    end = True
+                    new_token = new_token[:new_token.index(",")]
+                if " " in new_token:
+                    end = True
+                    new_token = new_token[:new_token.index(" ")]
+                if "}" in new_token:
+                    end = True
+                    new_token = new_token[:new_token.index("}")]
+            elif type == "string":
+                if '"' in new_token:
+                    end = True
+                    new_token = new_token[:new_token.index('"')]
             
             if end:
+                # re encode to remove the last part
                 new_token_truncated_id = self.model.encode(new_token)[0]
                 tokens += [int(token) for token in new_token_truncated_id]
             else:
                 tokens += [new_token_id]
             
-            if new_token.startswith('"'):
-                new_token = new_token[1:]
-                stage = NumberStage.DOUBLE_POINT
-            if new_token.startswith(':'):
-                new_token = new_token[1:]
-                stage = NumberStage.SPACE
-            if new_token.startswith(' '):
-                new_token = new_token[1:]
-                stage = NumberStage.MINUS
-                generated_first_space = True
-            value += new_token
+            if type == "number":
+                if new_token.startswith('"'):
+                    new_token = new_token[1:]
+                    stage = NumberStage.DOUBLE_POINT
+                if new_token.startswith(':'):
+                    new_token = new_token[1:]
+                    stage = NumberStage.SPACE
+                if new_token.startswith(' '):
+                    new_token = new_token[1:]
+                    stage = NumberStage.MINUS
+                    generated_first_space = True
 
-            print(value)
+            value += new_token
 
             if end:
                 return value
@@ -309,8 +308,8 @@ class LLM():
     def __get_arguments(
             self,
             tokens: list[int],
-            func_name: str) -> list[dict[str, str]]:
-        arg_values: list[dict[str, str]] = []
+            func_name: str) -> dict[str, str]:
+        arg_values: dict[str, str] = {}
         args = self.__get_arguments_name_type(func_name)
 
         for i in range(len(args)):
@@ -319,7 +318,9 @@ class LLM():
             template = self.__get_argument_template(name, type, i)
             tokens += [int(token) for token in self.model.encode(template)[0]]
             value = self.__get_arg_value(tokens, type)
-            arg_values.append({name: value})
+            if type == "number" and "." not in value:
+                value += ".0"
+            arg_values[name] = value
 
         return arg_values
 
@@ -332,26 +333,31 @@ class LLM():
             print("Incorrect function name generated", file=sys.stderr)
             sys.exit(1)
 
-    def get_prompt_solution(self, prompt: str) -> str:
+    def get_prompt_solution(self, prompt: str) -> dict[str, object]:
         template = self.__get_chat_template(prompt)
 
         tokens = [int(token) for token in self.model.encode(template)[0]]
 
-        solution: str = ""
-
         tokens += self.pre_enc_prompt['<tool_call>\n']
         tokens += self.pre_enc_prompt['{"name": "']
-        solution += '{"name": "'
+
+        print(f"==================\n\nPrompt:\n{prompt}\n")
 
         name = self.__get_function_name(tokens)
         self.__assert_function_name(name)
-        solution += name
+
+        print(f"Function name:\n{name}\n")
 
         tokens += self.pre_enc_prompt['", "arguments": {']
-        solution += '", "arguments": {'
-        
-        args = self.__get_arguments(tokens, name)
-        print(args)
 
-        print(solution)
+        args: dict[str, str] = self.__get_arguments(tokens, name)
+
+        print(f"Arguments:\n{args}\n")
+
+        solution: dict[str, object] = {
+            "prompt": prompt,
+            "name": name,
+            "parameters": args
+        }
+
         return solution
